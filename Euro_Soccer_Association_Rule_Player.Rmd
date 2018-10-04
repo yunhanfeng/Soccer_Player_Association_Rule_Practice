@@ -1,0 +1,270 @@
+---
+title: "Soccer_AssociationRule"
+author: "Henry"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## The Business Problem and Approach
+
+## Library needed packages
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(magrittr)
+library(tidyr)
+library(arules)
+library(ggplot2)
+```
+
+## Load in the needed table
+```{r warning=FALSE}
+setwd("C:\\Users\\fengy\\Desktop\\Fall\\3. EDA\\HW 2\\HW 2")
+match <- read.csv('match.csv')
+player = read.csv('player.csv')
+p_attributes = read.csv('player_attribute.csv')
+team = read.csv('team.csv')
+t_attributes = read.csv('team_attributes.csv')
+```
+
+## Player Analysis
+*Description and Rationale for the chosen analysis*
+
+For team Roma, the biggest asset is the player. And player is also one of the big sucess factor for the winning game. 
+
+In this section of analyses, we will first plot the players frequency of participating the winning games, both home match and away match. From this discriptive analyses, we might give the coach an overview of specifc player with winning games.
+
+Further, in order to locate the players who associate with the winning game. We perform association rules to find the association relationship between player and winning/losing game. We also segment the data into home match and away match. Our assumption here is that the association rule between players and players with higher lift might lead to more possibility of success if the coach arrange certain player together.
+
+*Execution and result*
+
+**Munging the data at first**
+We try to munge the data to prepare for the association rule matrix. The dataframe in the end contains columns match_id, player, player_api_id and player name. 
+```{r}
+# Locate the roma info
+long_team_name <- 'Roma'
+roma_record <- team %>% 
+  collect() %>%
+  filter(grepl(long_team_name, team_long_name))
+
+# Get the Roma_home_team_matches
+home_matches <- filter(match, home_team_api_id == roma_record$team_api_id)
+
+# match id & goal diff
+match_outcomes_per_match <- match %>% 
+  mutate(goal_diff =home_team_goal - away_team_goal) %>% 
+  select(id, goal_diff) 
+
+colnames(match_outcomes_per_match) <- c('match_id', 'goal_diff')
+
+# match/ player position/ player_api_id
+roma_players_per_match <- select(home_matches, id, matches("home_player_[[:digit:]]")) %>%
+  collect() %>%
+  gather(player, player_api_id, -id) 
+
+colnames(roma_players_per_match) <- c('match_id', 'player','player_api_id')
+
+# create table : match_id, player, player_api_id & player name
+roma_player_id <- roma_players_per_match %>% distinct(player_api_id)
+roma_player_info <- merge(roma_player_id, player, by = 'player_api_id')
+roma_player_info2 <- roma_player_info %>% select(player_api_id, player_name)
+roma_player_per_match2 <- left_join(roma_players_per_match, roma_player_info2, by = 'player_api_id')
+head(roma_player_per_match2)
+```
+
+**Use simple EDA to plot the distribution of 2015/2016 season winning and away game player**
+```{r include=FALSE}
+match_16 <- match %>%
+            filter(season == '2015/2016' & home_team_api_id == 8686)
+
+match_16_win <- match_16 %>%
+                filter(home_team_goal > away_team_goal)
+
+match_16_aw <- match %>%
+  filter(season == '2015/2016' & away_team_api_id == 8686)
+
+match_16_aw_win <- match_16_aw %>%
+  filter(home_team_goal < away_team_goal)
+
+## Find the player for winning home game
+player_win_home <- select(match_16_win, id, matches("home_player_[[:digit:]]")) %>%
+  collect() %>%
+  gather(player, player_api_id, -id) %>%
+  arrange(id)
+
+colnames(player_win_home) <- c('match_id', 'player','player_api_id')
+
+win_16_playerlist <- left_join(player_win_home, roma_player_info2, by = 'player_api_id')
+win_16_player_list2 <- win_16_playerlist %>% 
+  group_by(match_id) %>%
+  summarise(player = paste(sort(unique(player_name)), collapse = ', '))
+
+head(win_16_player_list2)
+```
+
+```{r}
+win16_player_count <- win_16_playerlist %>% 
+  group_by(player_name) %>%
+  summarise(number = n()) %>%
+  arrange(desc(number))
+
+win16_player_count <- transform(win16_player_count, player_name = reorder(player_name, -number))
+
+ggplot(win16_player_count, aes(x=player_name, y =number)) + 
+  geom_bar(stat='identity')+
+  ggtitle('The Frequency of Players on the Field for 2016 Winning Home Game')+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+```{r include=FALSE}
+player_win_away <- select(match_16_aw_win, id,matches("away_player_[[:digit:]]")) %>%
+  collect() %>%
+  gather(player, player_api_id, -id) %>%
+  arrange(id)
+
+colnames(player_win_away) <- c('match_id', 'player','player_api_id')
+
+win_16aw_playerlist <- left_join(player_win_away, roma_player_info2, by = 'player_api_id')
+win_16aw_player_list2 <- win_16aw_playerlist %>% 
+  group_by(match_id) %>%
+  summarise(player = paste(sort(unique(player_name)), collapse = ', '))
+
+win16aw_player_count <- win_16aw_playerlist %>% 
+  group_by(player_name) %>%
+  summarise(number = n()) %>%
+  arrange(desc(number))
+
+win16aw_player_count <- transform(win16aw_player_count, player_name = reorder(player_name, -number))
+```
+
+```{r}
+ggplot(win16aw_player_count, aes(x=player_name, y =number)) + 
+  geom_bar(stat='identity')+
+  ggtitle('The Frequency of Players on the Field for 2016 Winning Away Game')+
+  theme(axis.text.x = element_text(angle = 50, hjust = 1))
+```
+
+*Interpretation*
+From the two graphs, we are able to find the slight difference of players who are assigned to home and away match. In the winning home match, Manolas (center back) leads the most frequency. And in the distribution of away game, Szczensny (goal keeper) had the most appearance. And Manolas became the player with 6th highest frequency. 
+
+We can have the evidence that the formation of team players in home and away game is slightly different. Goal keeper was in the top three list, but players like Digne (Left back) (away match 2nd higher, home match 8th higher) and  Pjanic (midfielder) (home match 4th highest and away match 12th highest). 
+
+Furthermore, based on the findings, we would continue with the division of home and away team. We will further use association rule on these two segmentation.
+
+
+**Association Rule for Player of winning/losing game at home matches**
+```{r include=FALSE}
+roma_player_per_match2$yes = 1
+roma_player_per_match3 <- subset(roma_player_per_match2, select = c('match_id', 'player_name','yes'))
+roma_player_all <- roma_player_per_match3 %>% spread(player_name, yes, fill = 0)
+home_allyear <- merge(match_outcomes_per_match, roma_player_all, by = 'match_id')
+```
+
+```{r include=FALSE}
+home_allyear <- home_allyear %>% 
+  select("match_id" : "Wojciech Szczesny")
+
+home_allyear$win_game = ifelse(home_allyear$goal_diff >= 0, 1,0)
+home_allyear$lose_game = ifelse(home_allyear$goal_diff < 0, 1,0)
+win_match <- home_allyear %>% 
+             filter(goal_diff >= 0) %>%
+             select("Adem Ljajic":"Wojciech Szczesny")
+lose_match <- home_allyear %>% 
+              filter(goal_diff <0) %>%
+              select("Adem Ljajic":"Wojciech Szczesny")
+```
+
+```{r include=FALSE}
+win_matrix_format = data.matrix(win_match)
+win_matrix = as(win_matrix_format, 'itemMatrix')
+
+lose_matrix_format = data.matrix(lose_match)
+lose_matrix = as(lose_matrix_format, 'itemMatrix')
+win_rule = apriori(data = win_matrix, parameter = list(support=0.1, confidence = 0.5))
+lose_rule = apriori(data = lose_matrix, parameter = list(support=0.1, confidence = 0.3))
+```
+
+```{r}
+win_rule = sort(win_rule, by = 'lift', decreasing = TRUE)
+inspect(head(win_rule,20))
+```
+
+*Interpretation*
+From the association rule, we collated all the data from the dataset, and subset it with roma home winning match. We found Mohamed Salah (forward) and Wojciech Szcaesny (goal keeper) were a good match in the previous matches record. And also, Konstantinos Manolas, Mohamed Salah, and Wojciech Szaesny were another good combination.  
+
+
+```{r}
+lose_rule = sort(lose_rule, by = 'lift', decreasing = TRUE)
+inspect(head(lose_rule,20))
+```
+
+*Interpretation*
+For the losing rule, the result showed that the combination of frequent players were are in the losing matches. We can't tell the significance from the table since the support, confidence, lift and count are almost equal with the column. It might provide the info that these twenty combination might not be a strong pairs for a winning game. 
+
+**Association Rule for Player of winning/losing game at home matches**
+```{r include=FALSE}
+away_matches <- filter(match, away_team_api_id == roma_record$team_api_id)
+
+players_per_match_away <- select(away_matches, id, matches("away_player_[[:digit:]]")) %>%
+  collect() %>%
+  gather(player, player_api_id, -id)
+
+colnames(players_per_match_away) <- c('match_id', 'player','player_api_id')
+
+players_per_match_away2 <- left_join(players_per_match_away, roma_player_info2, by = 'player_api_id')
+
+players_per_match_away2$yes = 1
+players_per_match_away3 <- subset(players_per_match_away2, select = c('match_id', 'player_name','yes'))
+players_per_match_away4 <- players_per_match_away3[!duplicated(players_per_match_away3), ]
+roma_player_all_away <- players_per_match_away4 %>% spread(player_name, yes, fill = 0)
+away_allyear <- merge(match_outcomes_per_match, roma_player_all_away, by = 'match_id')
+
+away_allyear <- away_allyear %>% 
+  select("match_id" : "Wojciech Szczesny")
+
+win_match_aw <- away_allyear %>% 
+  filter(goal_diff <= 0) %>%
+  select("Adem Ljajic":"Wojciech Szczesny")
+
+lose_match_aw <- away_allyear %>% 
+  filter(goal_diff > 0) %>%
+  select("Adem Ljajic":"Wojciech Szczesny")
+```
+
+```{r include=FALSE}
+#AR away match win
+win_matrix_format_aw = data.matrix(win_match_aw)
+win_matrix_aw = as(win_matrix_format_aw, 'itemMatrix')
+win_rule_aw = apriori(data = win_matrix_aw, parameter = list(support=0.1, confidence = 0.5))
+```
+
+```{r}
+win_rule_aw = sort(win_rule_aw, by = 'lift', decreasing = TRUE)
+inspect(head(win_rule_aw,20))
+```
+
+*Interpretation*
+
+From the away winning matches, we can observe that Lucas Digne is frequently appearing in the winning matches with high lift, which indicated that most of the winning away matches, he might play a influencial role. Lucas Dinge was a loaned player for Roma in the season 2015/2016. We recommend that Roma should search for the player equipped with the similar player attribute with Lucas Dinge. The cooperation between the potential player and the original players might improve the winning rate of away matches. 
+
+```{r include=FALSE}
+# AR awau match lose
+lose_matrix_format_aw = data.matrix(lose_match_aw)
+lose_matrix_aw = as(lose_matrix_format_aw, 'itemMatrix')
+summary(lose_matrix_aw)
+
+lose_rule_aw = apriori(data = lose_matrix_aw, parameter = list(support=0.1, confidence = 0.5))
+```
+
+```{r}
+lose_rule_aw = sort(lose_rule_aw, by = 'lift', decreasing = TRUE)
+inspect(head(lose_rule_aw,20))
+```
+
+*Interpretation*
+
+From the assoication rule of losing away matches, the combinations of Marco Borriello (foward), Simon Perrotta (Central) and Julio Sergio (goal keeper) and Rossi (midfielder), Gago (midfielder) and Osvaldo(striker) have high lift. We would suggest the coach that he shouldn't arrange these players to play in the same formation. Substituting one or two of them for renewing the player formation is recommended.
